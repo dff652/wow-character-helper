@@ -1,0 +1,54 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Drawing;
+using System.Collections.Generic;
+using System.Xml.Serialization;
+
+static class ConfigurationChecks {
+ public static int Run(string root){
+  root=Path.GetFullPath(root);Directory.CreateDirectory(root);CreationConfig.TestRoot=root;CalibrationStore.TestRoot=root;ResultsStore.TestRoot=root;
+  var log=new List<string>();
+  Action<bool,string> check=(yes,name)=>{if(!yes)throw new Exception("FAIL: "+name);log.Add("PASS: "+name);};
+  try{
+   var c=new CreationConfig();c.Validate();check(c.Builtin&&CalibrationStore.Ready(c),"default verified profile");
+   var changed=c.Copy();changed.FirstName="测试配置";check(!changed.Builtin&&!CalibrationStore.Ready(changed),"changed name requires calibration");
+   changed.Save();var read=CreationConfig.Load();check(read.FirstName==changed.FirstName&&read.Key==changed.Key,"Unicode configuration round trip");
+   changed.LastName="测试次名";changed.IntervalSeconds=300;changed.Scheduled=true;changed.StartAt=DateTime.Now.AddDays(1);changed.Save();read=CreationConfig.Load();check(read.LastName==changed.LastName&&read.IntervalSeconds==300&&read.Scheduled,"configuration replacement and schedule");
+   var invalid=c.Copy();invalid.Faction="联盟";bool rejected=false;try{invalid.Validate();}catch{rejected=true;}check(rejected,"mismatched faction and race rejected");
+   invalid=c.Copy();invalid.FirstName=" ";rejected=false;try{invalid.Validate();}catch{rejected=true;}check(rejected,"blank name rejected");
+   invalid=c.Copy();invalid.IntervalSeconds=0;rejected=false;try{invalid.Validate();}catch{rejected=true;}check(rejected,"invalid interval rejected");
+   check(new CreationConfig{Faction="联盟",Race="暗夜精灵"}.RacePoint==new Point(104,423),"faction changes actual race coordinates");
+   check(new CreationConfig{Gender="女性"}.GenderX==1325,"gender routes to female control");
+   foreach(var rule in CreationConfig.Rules){var a=c.Copy();a.RuleSet=rule;a.Validate();check(a.RuleIndex>=0&&a.RuleIndex<4,"ruleset "+rule);}
+   using(var image=new Bitmap(16,16)){
+    var pending=ResultsStore.Add(changed,1,"待确认","test",image);check(File.Exists(ResultsStore.ImagePath(pending)),"result screenshot retained");ResultsStore.Confirm(pending);
+    var saved=ResultsStore.All().Single(r=>r.Id==pending.Id);check(saved.Status=="成功（人工确认）"&&!string.IsNullOrEmpty(saved.ConfirmedAt)&&saved.Config.FirstName==changed.FirstName,"success confirmation persisted with identity and time");
+    var blocked=ResultsStore.Add(c,2,"待确认","before submit",image);ResultsStore.Update(blocked,"被拦截","server blocked",image);check(ResultsStore.All().Count(r=>r.Id==blocked.Id)==1&&File.Exists(ResultsStore.ImagePath(blocked)),"one durable attempt updated with result screenshot");rejected=false;try{ResultsStore.Confirm(blocked);}catch{rejected=true;}check(rejected,"blocked result cannot be marked success");
+   }
+   // This profile exercises actual non-default coordinates in the no-submit preview test.
+   var preview=c.Copy();preview.Gender="女性";preview.FirstName="歪瑞歪瑞";preview.LastName="古德";
+   using(var f=File.Create(Path.Combine(root,"preview-config.xml")))new XmlSerializer(typeof(CreationConfig)).Serialize(f,preview);
+   // Relocation tests use an isolated legacy installation, never the user's data.
+   string migration=Path.Combine(root,"migration-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(migration);
+   AppPaths.TestRoot=migration;CreationConfig.TestRoot=migration;ResultsStore.TestRoot=migration;changed.Save();
+   AttemptRecord legacy;using(var picture=new Bitmap(16,16))legacy=ResultsStore.Add(changed,1,"待确认","legacy",picture);
+   legacy.Screenshot=Path.Combine(migration,"records",legacy.Id+".png");
+   using(var f=File.Create(Path.Combine(migration,"records",legacy.Id+".xml")))new XmlSerializer(typeof(AttemptRecord)).Serialize(f,legacy);
+   File.WriteAllText(Path.Combine(migration,"运行记录.txt"),"original log");File.WriteAllText(Path.Combine(migration,"调试-尺寸.txt"),"3840x2160");
+   using(var picture=new Bitmap(8,8))picture.Save(Path.Combine(migration,"最后结果.png"));
+   Directory.CreateDirectory(Path.Combine(migration,"profiles","sample"));File.WriteAllText(Path.Combine(migration,"profiles","sample","confirmed.txt"),"preserve");
+   AppPaths.Initialize();CreationConfig.TestRoot=null;ResultsStore.TestRoot=null;CalibrationStore.TestRoot=null;
+   check(CreationConfig.Load().FirstName==changed.FirstName&&!File.Exists(Path.Combine(migration,"建号配置.xml")),"legacy config moved and loaded");
+   var moved=ResultsStore.All().Single();check(File.Exists(ResultsStore.ImagePath(moved)),"legacy absolute screenshot reference resolves after move");
+   check(File.ReadAllText(Path.Combine(AppPaths.Logs,"运行记录.txt"))=="original log"&&File.Exists(Path.Combine(AppPaths.Screenshots,"最后结果.png")),"legacy logs and screenshots preserved");
+   check(File.Exists(Path.Combine(AppPaths.Profiles,"sample","confirmed.txt")),"legacy calibration moved");
+   AppPaths.Initialize();check(ResultsStore.All().Count==1,"migration is idempotent");
+   File.WriteAllText(Path.Combine(migration,"运行记录.txt"),"conflict log");AppPaths.Initialize();
+   check(File.ReadAllText(Path.Combine(AppPaths.Logs,"运行记录.txt"))=="original log"&&File.ReadAllText(Path.Combine(AppPaths.Data,"legacy","运行记录.txt"))=="conflict log","migration conflict keeps both files");
+   check(Directory.GetFiles(migration).Length==0,"runtime data does not clutter application root");
+   log.Add("PASS");File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 0;
+  }catch(Exception ex){log.Add(ex.ToString());File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 1;}
+  finally{CreationConfig.TestRoot=null;CalibrationStore.TestRoot=null;ResultsStore.TestRoot=null;AppPaths.TestRoot=null;}
+ }
+}

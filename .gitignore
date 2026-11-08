@@ -1,0 +1,17 @@
+# Runtime and personal data
+/data/
+/records/
+/profiles/
+/dist/
+/test-output/
+*.exe
+*.pdb
+*.zip
+*.tmp
+/建号配置.xml
+/运行记录.txt
+/实测记录.txt
+/test-error.txt
+/调试-*
+/最后结果.png
+.vs/
