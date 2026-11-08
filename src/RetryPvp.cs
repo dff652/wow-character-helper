@@ -13,6 +13,10 @@ using System.Windows.Forms;
 using System.Text;
 
 static class Native {
+ // Task.Run workers must opt into physical coordinates independently of the WinForms UI thread.
+ [DllImport("user32.dll",SetLastError=true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+ [ThreadStatic] static bool physicalCoordinates;
+ public static void EnsurePhysicalCoordinates(){if(physicalCoordinates)return;if(SetThreadDpiAwarenessContext(new IntPtr(-4))==IntPtr.Zero)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"无法启用物理像素坐标，停止操作。");physicalCoordinates=true;}
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
@@ -111,12 +115,15 @@ sealed class Vision {
 sealed class Runner {
  readonly Vision v;readonly Action<string> log;readonly CancellationToken ct;readonly int interval,max;readonly bool restart;
  readonly CreationConfig config;readonly Vision profile;DateTime? endAt;
+ public int AttemptLimit {get{return max;}}
+ public volatile int AttemptNumber,BlockedCount;long nextTicks;public DateTime? NextAttemptUtc {get{long ticks=Interlocked.Read(ref nextTicks);return ticks==0?(DateTime?)null:new DateTime(ticks,DateTimeKind.Utc);}}
+ string observedState;int observedWidth,observedHeight,step;readonly string session=DateTime.Now.ToString("yyyyMMdd-HHmmss");
  IntPtr target;Point origin;Mask latest;string state;double scaleX=1,scaleY=1;
  string GamePath {get{return config.GamePath;}}
  string LauncherPath {get{return config.LauncherPath;}}
  public Runner(Vision v,Action<string> log,CancellationToken ct,int interval,int max,bool restart):this(v,log,ct,new CreationConfig{IntervalSeconds=interval,MaxAttempts=max,Restart=restart}){}
  public Runner(Vision v,Action<string> log,CancellationToken ct,CreationConfig c){this.v=v;this.log=log;this.ct=ct;config=c.Copy();interval=c.IntervalSeconds;max=c.MaxAttempts;restart=c.Restart;if(!c.Builtin&&CalibrationStore.Ready(c))profile=new Vision(CalibrationStore.Dir(c));}
- void Check(){ct.ThrowIfCancellationRequested();if(endAt.HasValue&&DateTime.UtcNow>=endAt.Value)throw new Exception("已达到最长运行时长，已停止。");if((Native.GetAsyncKeyState(27)&0x8000)!=0||(Native.GetAsyncKeyState(120)&0x8000)!=0)throw new OperationCanceledException();if(target!=IntPtr.Zero&&Native.GetForegroundWindow()!=target){uint a,b;Native.GetWindowThreadProcessId(target,out a);var front=Native.GetForegroundWindow();Native.GetWindowThreadProcessId(front,out b);if(a!=0&&a==b)return;var title=new StringBuilder(512);Native.GetWindowText(front,title,512);throw new Exception("游戏或战网失去前台，已停止。当前窗口："+title);}}
+ void Check(){Native.EnsurePhysicalCoordinates();ct.ThrowIfCancellationRequested();if(endAt.HasValue&&DateTime.UtcNow>=endAt.Value)throw new Exception("已达到最长运行时长，已停止。");if((Native.GetAsyncKeyState(27)&0x8000)!=0||(Native.GetAsyncKeyState(120)&0x8000)!=0)throw new OperationCanceledException();if(target!=IntPtr.Zero&&Native.GetForegroundWindow()!=target){uint a,b;Native.GetWindowThreadProcessId(target,out a);var front=Native.GetForegroundWindow();Native.GetWindowThreadProcessId(front,out b);if(a!=0&&a==b)return;var title=new StringBuilder(512);Native.GetWindowText(front,title,512);throw new Exception("游戏或战网失去前台，已停止。当前窗口："+title);}}
  void Delay(int ms){var timer=Stopwatch.StartNew();while(timer.ElapsedMilliseconds<ms){Check();int left=ms-(int)timer.ElapsedMilliseconds;if(left>0)Thread.Sleep(Math.Min(100,left));}Check();}
  void Bind(){
   target=UniqueWindow(GamePath);if(target==IntPtr.Zero)throw new Exception("未找到游戏主窗口。");Check();uint id;Native.GetWindowThreadProcessId(target,out id);
@@ -170,6 +177,7 @@ sealed class Runner {
    return new Point(origin.X+at.Value.X+patch.W/2,origin.Y+at.Value.Y+patch.H/2);
   }
  }
+ static bool SameProcess(IntPtr a,IntPtr b){if(a==IntPtr.Zero||b==IntPtr.Zero)return false;uint x,y;Native.GetWindowThreadProcessId(a,out x);Native.GetWindowThreadProcessId(b,out y);return x!=0&&x==y;}
  void LaunchGame(){
   Check();if(GameExists())throw new Exception("游戏仍在运行，已停止，避免重复启动。");
   var p=LaunchButton();
@@ -178,8 +186,8 @@ sealed class Runner {
   IntPtr launcher=target;target=IntPtr.Zero;var end=DateTime.UtcNow.AddSeconds(120);
   while(DateTime.UtcNow<end){
    Check();IntPtr game=UniqueWindow(GamePath),front=Native.GetForegroundWindow();
-   if(game!=IntPtr.Zero&&front==game){target=game;Bind();break;}
-   if(front!=IntPtr.Zero&&front!=launcher&&front!=game)throw new Exception("启动期间切换到了其他窗口，已停止。");
+   if(game!=IntPtr.Zero&&SameProcess(front,game)){target=game;Bind();break;}
+   if(front!=IntPtr.Zero&&!SameProcess(front,launcher)&&!SameProcess(front,game)){var title=new StringBuilder(512);Native.GetWindowText(front,title,512);throw new Exception("启动期间切换到了其他窗口，已停止："+title);}
    Delay(300);
   }
   if(target==IntPtr.Zero)throw new Exception("游戏启动超时，已停止。");
@@ -190,10 +198,10 @@ sealed class Runner {
  void RestartAfterDelay(){
   Cooldown("游戏已退出");ShowLauncher();LaunchGame();
  }
- void Cooldown(string reason){target=IntPtr.Zero;log(reason+"，等待 "+interval+" 秒。等待期间可切换窗口，F9 或 Esc 可停止。");Delay((interval-5)*1000);log("5 秒后自动切回，开始下一轮。");Delay(5000);}
+ void Cooldown(string reason){Interlocked.Exchange(ref nextTicks,DateTime.UtcNow.AddSeconds(interval).Ticks);target=IntPtr.Zero;log(reason+"，等待 "+interval+" 秒。等待期间可切换窗口，F9 或 Esc 可停止。");Delay((interval-5)*1000);log("5 秒后自动切回，开始下一轮。");Delay(5000);Interlocked.Exchange(ref nextTicks,0);}
  void ReselectAfterDelay(){Cooldown("本轮受阵营限制");target=UniqueWindow(GamePath);if(target==IntPtr.Zero)throw new Exception("等待期间游戏已关闭，已停止。");Native.FocusWindow(target);Thread.Sleep(500);Check();}
  Bitmap Capture(){
-  Check();Native.Rect r;if(!Native.GetClientRect(target,out r)||r.R<1280||r.B<720||Math.Abs(r.R/(double)r.B-16.0/9)>0.03)throw new Exception("游戏画面比例不符（"+r.R+"×"+r.B+"），请恢复采样时的分辨率和界面缩放。");
+  Check();Native.Rect r;if(!Native.GetClientRect(target,out r))throw new Exception("无法读取游戏客户区尺寸。");config.ValidateDisplay(r.R,r.B);if(r.R!=observedWidth||r.B!=observedHeight){observedWidth=r.R;observedHeight=r.B;log("显示检测："+r.R+"×"+r.B+" 物理像素；标准 16:9；模式："+config.DisplayMode);}
   origin=new Point(0,0);Native.ClientToScreen(target,ref origin);
   scaleX=r.R/2560.0;scaleY=r.B/1440.0;
   using(var raw=new Bitmap(r.R,r.B,PixelFormat.Format32bppArgb)){
@@ -201,7 +209,8 @@ sealed class Runner {
    var b=new Bitmap(2560,1440,PixelFormat.Format32bppArgb);using(var g=Graphics.FromImage(b)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.Bilinear;g.DrawImage(raw,new Rectangle(0,0,2560,1440));}Check();return b;
   }
  }
- string Observe(){using(var b=Capture()){latest=new Mask(b);state=v.State(latest);return state;}}
+ static string PageName(string value){switch(value){case "rules":return "规则集选择";case "list":return "角色列表";case "race":return "种族与职业";case "custom":return "外观与姓名";case "loading":return "加载中";case "blocked":return "阵营限制";default:return "暂未识别（等待页面稳定）";}}
+ string Observe(){using(var b=Capture()){latest=new Mask(b);state=v.State(latest);if(state!=observedState){observedState=state;string file=session+"-"+(++step).ToString("D3")+"-"+state+".png";b.Save(Path.Combine(AppPaths.Screenshots,file));log("页面检查："+PageName(state)+"；截图："+file);}return state;}}
  public void SaveDiagnostic(string name){try{using(var b=Capture())b.Save(Path.Combine(AppPaths.Screenshots,name+".png"));}catch{}}
  void Wait(string expected,int seconds=60){var end=DateTime.UtcNow.AddSeconds(seconds);int stable=0;while(DateTime.UtcNow<end){if(Observe()==expected){if(++stable>=3)return;}else stable=0;Delay(600);}throw new Exception("等待页面超时："+expected+"；已停止，请检查游戏。");}
  void Require(string expected){if(Observe()!=expected)throw new Exception("页面不符合预期，已停止（预期 "+expected+"）。");}
@@ -262,13 +271,13 @@ sealed class Runner {
  void Record(AttemptRecord record,string status,string detail){using(var b=Capture())ResultsStore.Update(record,status,detail,b);}
  public void Run(bool activate=false){
   config.Validate();if(!CalibrationStore.Ready(config))throw new Exception("这组角色信息尚未校准，请先运行预览校准并确认。");
-  if(config.Scheduled&&config.StartAt>DateTime.Now){log("已预约于 "+config.StartAt.ToString("yyyy-MM-dd HH:mm:ss")+" 开始。F9 可取消。");while(DateTime.Now<config.StartAt)Delay((int)Math.Min(1000,(config.StartAt-DateTime.Now).TotalMilliseconds+1));activate=true;}
+  if(config.Scheduled&&config.StartAt>DateTime.Now){Interlocked.Exchange(ref nextTicks,config.StartAt.ToUniversalTime().Ticks);log("已预约于 "+config.StartAt.ToString("yyyy-MM-dd HH:mm:ss")+" 开始。F9 可取消。");while(DateTime.Now<config.StartAt)Delay((int)Math.Min(1000,(config.StartAt-DateTime.Now).TotalMilliseconds+1));Interlocked.Exchange(ref nextTicks,0);activate=true;}
   if(config.MaxMinutes>0)endAt=DateTime.UtcNow.AddMinutes(config.MaxMinutes);
   if(activate)FocusInitial();
   log("5 秒后开始，请切回游戏或战网无限服页面。F9 或 Esc 停止。");Delay(5000);
   if(GameExists()){Bind();if(restart&&Observe()=="blocked"){CloseBlockedGame();RestartAfterDelay();}}
   else{target=Native.GetForegroundWindow();uint pid;Native.GetWindowThreadProcessId(target,out pid);using(var p=Process.GetProcessById((int)pid))if(!string.Equals(p.MainModule.FileName,LauncherPath,StringComparison.OrdinalIgnoreCase))throw new Exception("请切回战网无限服页面再开始。");LaunchGame();}
-  for(int i=1;i<=max;i++){
+  for(int i=1;i<=max;i++){AttemptNumber=i;
    log("第 "+i+" 轮：返回并重新选择 "+config.RuleSet+"。");BackToRules();var record=Create(i);
    var end=DateTime.UtcNow.AddSeconds(35);bool blocked=false;
    while(DateTime.UtcNow<end){if(Observe()=="blocked"){blocked=true;break;}Delay(700);}
@@ -277,7 +286,7 @@ sealed class Runner {
     using(var b=Capture())b.Save(Path.Combine(AppPaths.Screenshots,"最后结果.png"));
     System.Media.SystemSounds.Exclamation.Play();throw new Exception("提交后没有出现已知阵营限制，已停止并保存截图。可能已创建成功，也可能是其他提示，请查看游戏；不会继续点击。");
    }
-   Record(record,"被拦截","服务器提示阵营人口不平衡。");SaveDiagnostic("调试-阵营拦截");log("第 "+i+" 轮仍受阵营限制。"+(i<max?"将继续定时尝试。":"已达尝试上限。"));
+   BlockedCount++;Record(record,"被拦截","服务器提示阵营人口不平衡。");SaveDiagnostic("调试-阵营拦截");log("第 "+i+" 轮仍受阵营限制。"+(i<max?"将继续定时尝试。":"已达尝试上限。"));
    if(restart){CloseBlockedGame();if(i<max)RestartAfterDelay();}
    else if(i<max)ReselectAfterDelay();
   }
@@ -290,6 +299,7 @@ static class Program {
    AppPaths.Initialize();if(args.Length==1&&args[0]=="--migrate-data")return 0;
    string dir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"templates");var v=new Vision(dir);
    if(args.Length==2&&args[0]=="--layout-test")return LayoutChecks.Run(v,args[1]);
+   if(args.Length==2&&args[0]=="--task-ui-test"){using(var form=new ConfigurationForm(v,true)){form.Show();var check=form.CheckTaskCancellation(args[1]);while(!check.IsCompleted){Application.DoEvents();Thread.Sleep(20);}check.GetAwaiter().GetResult();form.Close();}return 0;}
    if(args.Length==2&&args[0]=="--preview"){
     Application.EnableVisualStyles();using(var form=new ConfigurationForm(v,true)){form.Show();Application.DoEvents();form.SavePreview(args[1]);form.Close();}return 0;
    }

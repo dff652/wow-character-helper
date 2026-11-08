@@ -10,6 +10,9 @@ using System.Xml.Serialization;
 public sealed class CreationConfig {
  public string RuleSet="PvP",Faction="部落",Race="牛头人",Gender="男性",ClassName="德鲁伊";
  public string FirstName="歪瑞歪瑞",LastName="古德";
+ public string DisplayMode="自动识别";
+ public static readonly string[] DisplayModes={"自动识别","标准 16:9（自动分辨率）","1920×1080 · 16:9","2560×1440 · 16:9","3840×2160 · 16:9"};
+ public void ValidateDisplay(int width,int height){if(width<1280||height<720||Math.Abs(width/(double)height-16.0/9)>0.03)throw new Exception("检测到 "+width+"×"+height+"；当前仅适配标准 16:9 布局，请将游戏切换为 16:9 窗口。");int index=Array.IndexOf(DisplayModes,DisplayMode);if(index>=2&&(width!=new[]{1920,2560,3840}[index-2]||height!=new[]{1080,1440,2160}[index-2]))throw new Exception("实际游戏客户区 "+width+"×"+height+" 与手动设置不一致，请选择自动识别或调整游戏窗口。");}
  public int IntervalSeconds=120,MaxAttempts=60,MaxMinutes=0;
  public bool Restart=true,Scheduled=false;
  public DateTime StartAt=DateTime.Now.AddMinutes(5);
@@ -28,6 +31,7 @@ public sealed class CreationConfig {
  [XmlIgnore] public string Key {get{using(var hash=SHA256.Create())return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(string.Join("\n",new[]{RuleSet,Faction,Race,Gender,ClassName,FirstName,LastName})))).Replace("-","").ToLowerInvariant();}}
  public CreationConfig Copy(){return (CreationConfig)MemberwiseClone();}
  public void Validate(){
+  if(!DisplayModes.Contains(DisplayMode))throw new Exception("请选择显示布局模式。");
   if(!Rules.Contains(RuleSet)||!(Faction=="部落"||Faction=="联盟")||!(Faction=="部落"?Horde:Alliance).Contains(Race)||!Classes.Contains(ClassName)||!(Gender=="男性"||Gender=="女性"))throw new Exception("请选择完整的规则集、阵营、种族、性别和职业。");
   foreach(var n in new[]{FirstName,LastName})if(string.IsNullOrWhiteSpace(n)||n!=n.Trim()||n.Any(char.IsControl)||n.Length>24)throw new Exception("主名和次名均不能为空，不含首尾空格或控制字符，最多 24 字符。最终命名限制由游戏校验。");
   if(IntervalSeconds<30||IntervalSeconds>86400||MaxAttempts<1||MaxAttempts>10000||MaxMinutes<0||MaxMinutes>10080)throw new Exception("定时参数超出范围。");

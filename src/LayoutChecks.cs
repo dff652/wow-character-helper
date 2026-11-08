@@ -13,7 +13,7 @@ static class LayoutChecks {
     form.Show();Application.DoEvents();float scale=cases[i,2]/100f;form.SetPreviewScale(scale);form.MinimumSize=Size.Empty;
     form.ClientSize=new Size(Math.Min((int)(1000*scale),cases[i,0]-60),Math.Min((int)(760*scale),cases[i,1]-100));Application.DoEvents();form.CheckLayout();
     string key=cases[i,0]+"x"+cases[i,1]+"-"+cases[i,2];form.SavePreview(Path.Combine(root,key+".png"));log.Add("PASS: simulated layout "+key);
-    if(i==1){form.SelectTab(2);form.SavePreview(Path.Combine(root,"results.png"));form.SelectTab(4);form.SavePreview(Path.Combine(root,"about.png"));}
+    if(i==1){form.SelectTab(2);form.SavePreview(Path.Combine(root,"results.png"));form.SelectTab(4);form.SavePreview(Path.Combine(root,"about.png"));form.SelectTab(5);form.SavePreview(Path.Combine(root,"tasks.png"));}
     form.Close();
    }
    log.Add("PASS (simulated control scaling; not physical monitor or game verification)");File.WriteAllLines(Path.Combine(root,"layout-verification.txt"),log);return 0;

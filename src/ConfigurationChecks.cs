@@ -11,7 +11,7 @@ static class ConfigurationChecks {
   var log=new List<string>();
   Action<bool,string> check=(yes,name)=>{if(!yes)throw new Exception("FAIL: "+name);log.Add("PASS: "+name);};
   try{
-   var c=new CreationConfig();c.Validate();check(c.Builtin&&CalibrationStore.Ready(c),"default verified profile");
+   var c=new CreationConfig();c.Validate();c.ValidateDisplay(3840,2160);var manual=c.Copy();manual.DisplayMode=CreationConfig.DisplayModes[2];bool mismatch=false;try{manual.ValidateDisplay(3840,2160);}catch{mismatch=true;}check(mismatch,"manual resolution mismatch stops");bool ultrawide=false;try{c.ValidateDisplay(3440,1440);}catch{ultrawide=true;}check(ultrawide,"unsupported ultrawide stops");check(c.Builtin&&CalibrationStore.Ready(c),"default verified profile");
    var changed=c.Copy();changed.FirstName="测试配置";check(!changed.Builtin&&!CalibrationStore.Ready(changed),"changed name requires calibration");
    changed.Save();var read=CreationConfig.Load();check(read.FirstName==changed.FirstName&&read.Key==changed.Key,"Unicode configuration round trip");
    changed.LastName="测试次名";changed.IntervalSeconds=300;changed.Scheduled=true;changed.StartAt=DateTime.Now.AddDays(1);changed.Save();read=CreationConfig.Load();check(read.LastName==changed.LastName&&read.IntervalSeconds==300&&read.Scheduled,"configuration replacement and schedule");
@@ -47,8 +47,16 @@ static class ConfigurationChecks {
    File.WriteAllText(Path.Combine(migration,"运行记录.txt"),"conflict log");AppPaths.Initialize();
    check(File.ReadAllText(Path.Combine(AppPaths.Logs,"运行记录.txt"))=="original log"&&File.ReadAllText(Path.Combine(AppPaths.Data,"legacy","运行记录.txt"))=="conflict log","migration conflict keeps both files");
    check(Directory.GetFiles(migration).Length==0,"runtime data does not clutter application root");
+   JobStore.TestRoot=Path.Combine(root,"jobs-"+Guid.NewGuid().ToString("N"));var now=DateTime.Now;
+   var future=new ScheduledJob{Name="future",RunAt=now.AddMinutes(5),Config=c.Copy()};JobStore.Save(future);check(JobStore.Due(now)==null,"future task does not run early");
+   future.RunAt=now.AddSeconds(-1);JobStore.Save(future);check(JobStore.Due(now).Id==future.Id,"due task selected");
+   future.Status="已停止";JobStore.Save(future);check(JobStore.Due(now)==null,"stopped task is not scheduled");
+   future.Status="运行中";JobStore.Save(future);JobStore.Recover(now);check(JobStore.All().Single().Status=="已中断","interrupted task requires manual restart");
+   future.Status="待执行";JobStore.Save(future);JobStore.Recover(now);check(JobStore.All().Single().Status=="已过期","missed schedule is not replayed on startup");
+   future.Config.FirstName="任务快照";JobStore.Save(future);check(JobStore.All().Single().Config.FirstName=="任务快照"&&c.FirstName!="任务快照","task stores separate configuration snapshot");
+   future.Status="运行中";bool cannotDelete=false;try{JobStore.Delete(future);}catch{cannotDelete=true;}check(cannotDelete,"running task cannot be deleted");future.Status="已停止";JobStore.Delete(future);check(JobStore.All().Count==0,"stopped task can be deleted");
    log.Add("PASS");File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 0;
   }catch(Exception ex){log.Add(ex.ToString());File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 1;}
-  finally{CreationConfig.TestRoot=null;CalibrationStore.TestRoot=null;ResultsStore.TestRoot=null;AppPaths.TestRoot=null;}
+  finally{CreationConfig.TestRoot=null;CalibrationStore.TestRoot=null;ResultsStore.TestRoot=null;AppPaths.TestRoot=null;JobStore.TestRoot=null;}
  }
 }
