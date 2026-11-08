@@ -55,6 +55,9 @@ static class ConfigurationChecks {
    future.Status="待执行";JobStore.Save(future);JobStore.Recover(now);check(JobStore.All().Single().Status=="已过期","missed schedule is not replayed on startup");
    future.Config.FirstName="任务快照";JobStore.Save(future);check(JobStore.All().Single().Config.FirstName=="任务快照"&&c.FirstName!="任务快照","task stores separate configuration snapshot");
    future.Status="运行中";bool cannotDelete=false;try{JobStore.Delete(future);}catch{cannotDelete=true;}check(cannotDelete,"running task cannot be deleted");future.Status="已停止";JobStore.Delete(future);check(JobStore.All().Count==0,"stopped task can be deleted");
+   double tick=0;var flow=new FlowTrace(()=>tick);flow.Begin("rules","select");tick=2;flow.Begin("role","configure");tick=5;var steps=flow.Snapshot();check(steps.Single(x=>x.Key=="rules").Seconds==2&&steps.Single(x=>x.Key=="role").Seconds==3,"node durations follow actual transitions");
+   flow.Finish("已停止","cancelled");tick=20;check(flow.Snapshot().Single(x=>x.Key=="role").Seconds==3,"stopped node timing freezes");flow.Begin("rules","retry");tick=24;flow.Finish("已完成","selected");check(flow.Snapshot().Single(x=>x.Key=="rules").Seconds==6&&flow.Snapshot().Single(x=>x.Key=="rules").Visits==2,"retry accumulates node time and visit count");
+   flow.Begin("result","server result");flow.Finish("被拦截","faction imbalance");flow.Begin("wait","cooldown");check(flow.Snapshot().Single(x=>x.Key=="result").Status=="被拦截","blocked result stays distinct from completion");
    log.Add("PASS");File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 0;
   }catch(Exception ex){log.Add(ex.ToString());File.WriteAllLines(Path.Combine(root,"config-verification.txt"),log);return 1;}
   finally{CreationConfig.TestRoot=null;CalibrationStore.TestRoot=null;ResultsStore.TestRoot=null;AppPaths.TestRoot=null;JobStore.TestRoot=null;}
