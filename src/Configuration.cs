@@ -10,6 +10,7 @@ using System.Xml.Serialization;
 public sealed class CreationConfig {
  public string RuleSet="PvP",Faction="部落",Race="牛头人",Gender="男性",ClassName="德鲁伊";
  public string FirstName="歪瑞歪瑞",LastName="古德";
+ public string ClientBuild=CombinationRules.Build;
  public string DisplayMode="自动识别";
  public static readonly string[] DisplayModes={"自动识别","标准 16:9（自动分辨率）","1920×1080 · 16:9","2560×1440 · 16:9","3840×2160 · 16:9"};
  public void ValidateDisplay(int width,int height){if(width<1280||height<720||Math.Abs(width/(double)height-16.0/9)>0.03)throw new Exception("检测到 "+width+"×"+height+"；当前仅适配标准 16:9 布局，请将游戏切换为 16:9 窗口。");int index=Array.IndexOf(DisplayModes,DisplayMode);if(index>=2&&(width!=new[]{1920,2560,3840}[index-2]||height!=new[]{1080,1440,2160}[index-2]))throw new Exception("实际游戏客户区 "+width+"×"+height+" 与手动设置不一致，请选择自动识别或调整游戏窗口。");}
@@ -40,7 +41,7 @@ public sealed class CreationConfig {
  internal static string TestRoot;
  public static string SettingsPath {get{return Path.Combine(TestRoot??AppPaths.Config,"建号配置.xml");}}
  public static CreationConfig Load(){if(!File.Exists(SettingsPath))return new CreationConfig();using(var f=File.OpenRead(SettingsPath)){var c=(CreationConfig)new XmlSerializer(typeof(CreationConfig)).Deserialize(f);c.Validate();return c;}}
- public void Save(){Validate();Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));string temp=SettingsPath+".tmp";using(var f=File.Create(temp))new XmlSerializer(typeof(CreationConfig)).Serialize(f,this);if(File.Exists(SettingsPath))File.Replace(temp,SettingsPath,null);else File.Move(temp,SettingsPath);}
+ public void Save(){CombinationRules.ValidateSave(this);Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));string temp=SettingsPath+".tmp";using(var f=File.Create(temp))new XmlSerializer(typeof(CreationConfig)).Serialize(f,this);if(File.Exists(SettingsPath))File.Replace(temp,SettingsPath,null);else File.Move(temp,SettingsPath);}
 }
 
 sealed class CalibrationBundle:IDisposable {
@@ -84,4 +85,6 @@ static class ResultsStore {
  public static List<AttemptRecord> All(){var list=new List<AttemptRecord>();lock(Gate){if(!Directory.Exists(Root))return list;foreach(string file in Directory.GetFiles(Root,"*.xml")){try{using(var f=File.OpenRead(file)){var record=(AttemptRecord)new XmlSerializer(typeof(AttemptRecord)).Deserialize(f);if(record==null||record.Config==null)continue;record.Config.Validate();list.Add(record);}}catch{}}}return list.OrderByDescending(r=>r.Time).ToList();}
  public static string ImagePath(AttemptRecord r){return string.IsNullOrEmpty(r.Screenshot)?null:Path.Combine(Root,Path.GetFileName(r.Screenshot));}
  public static void Confirm(AttemptRecord r){if(r.Status!="待确认")throw new Exception("只有待确认记录可以标记成功。");lock(Gate){r.Status="成功（人工确认）";r.ConfirmedAt=DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");r.Detail="用户核对游戏后确认建号成功；程序未自动判定。";Save(r);}}
+ public static void MarkNameConflict(AttemptRecord r){if(r.Status!="待确认")throw new Exception("只有待确认记录可人工标记重名。");lock(Gate){r.Status="重名待修改（人工确认）";r.Detail="用户核对游戏提示后确认主名与次名组合已占用。原姓名和截图保留，请修改姓名后另行启动。";Save(r);}}
+ public static void ValidateNameRetry(CreationConfig c){if(All().Any(r=>r.Status=="重名待修改（人工确认）"&&r.Config.ClientBuild==c.ClientBuild&&r.Config.RuleSet==c.RuleSet&&string.Equals(r.Config.GamePath,c.GamePath,StringComparison.OrdinalIgnoreCase)&&r.Config.FirstName==c.FirstName&&r.Config.LastName==c.LastName))throw new Exception("此规则集下这组主名＋次名已被人工标记为重名，请修改姓名后再启动。");}
 }

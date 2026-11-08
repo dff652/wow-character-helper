@@ -1,3 +1,4 @@
+> 开发预览 **1.4.0-preview**：增加版本绑定的组合校验、职业联动和人工重名处理。白名单尚不完整，自动识别重名尚未实现。详见 [组合与重名说明](docs/COMBINATION-AND-NAMES.md)。下方保留稳定版功能说明。
 # 无限服建号助手 · WoW Character Helper
 
 版本 **1.3.2** · 作者 **dff652** · 开发协助：OpenAI Codex

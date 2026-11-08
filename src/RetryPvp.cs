@@ -274,15 +274,15 @@ sealed class Runner {
   AttemptRecord record;using(var b=Capture())record=ResultsStore.Add(config,attempt,"待确认","准备发送建号请求。若程序中断，请先核对游戏；这条记录不代表请求已送达或创建成功。",b);
   SaveDiagnostic("调试-提交前");log("角色与姓名核对通过，提交创建。");Button("finish","custom");return record;
  }
- public CalibrationBundle Calibrate(){Flow.Begin("prepare","检查配置并准备不提交预览。");config.Validate();FocusInitial();log("预览校准：不会点击完成或提交建号。");Delay(3000);if(GameExists())Bind();else LaunchGame();BackToRules();return PrepareCharacter(true);}
+ public CalibrationBundle Calibrate(){Flow.Begin("prepare","检查配置并准备不提交预览。");CombinationRules.ValidateSave(config);CombinationRules.ValidateInstalledBuild(config);FocusInitial();log("预览校准：不会点击完成或提交建号。");Delay(3000);if(GameExists())Bind();else LaunchGame();BackToRules();return PrepareCharacter(true);}
  void FocusInitial(){var h=UniqueWindow(GamePath);if(h!=IntPtr.Zero){Native.FocusWindow(h);Thread.Sleep(500);target=h;Check();}else ShowLauncher();}
  void Record(AttemptRecord record,string status,string detail){using(var b=Capture())ResultsStore.Update(record,status,detail,b);}
  public void Run(bool activate=false){
   Flow.Begin("prepare","校验角色配置、窗口和显示尺寸。");
-  if(!restart)Flow.Skip("exit","本模式保留游戏窗口。");config.Validate();if(!CalibrationStore.Ready(config))throw new Exception("这组角色信息尚未校准，请先运行预览校准并确认。");
+  if(!restart)Flow.Skip("exit","本模式保留游戏窗口。");CombinationRules.ValidateExecution(config);ResultsStore.ValidateNameRetry(config);if(!CalibrationStore.Ready(config))throw new Exception("这组角色信息尚未校准，请先运行预览校准并确认。");
   if(config.Scheduled&&config.StartAt>DateTime.Now){Flow.Begin("wait","等待预约开始时间。");Interlocked.Exchange(ref nextTicks,config.StartAt.ToUniversalTime().Ticks);log("已预约于 "+config.StartAt.ToString("yyyy-MM-dd HH:mm:ss")+" 开始。F9 可取消。");while(DateTime.Now<config.StartAt)Delay((int)Math.Min(1000,(config.StartAt-DateTime.Now).TotalMilliseconds+1));Interlocked.Exchange(ref nextTicks,0);activate=true;}
   if(config.MaxMinutes>0)endAt=DateTime.UtcNow.AddMinutes(config.MaxMinutes);
-  if(activate)FocusInitial();
+  CombinationRules.ValidateInstalledBuild(config);if(activate)FocusInitial();
   log("5 秒后开始，请切回游戏或战网无限服页面。F9 或 Esc 停止。");Delay(5000);
   if(GameExists()){Flow.Skip("launch","游戏已打开，无需启动。");Bind();if(restart&&Observe()=="blocked"){CloseBlockedGame();RestartAfterDelay();}}
   else{target=Native.GetForegroundWindow();uint pid;Native.GetWindowThreadProcessId(target,out pid);using(var p=Process.GetProcessById((int)pid))if(!string.Equals(p.MainModule.FileName,LauncherPath,StringComparison.OrdinalIgnoreCase))throw new Exception("请切回战网无限服页面再开始。");LaunchGame();}
