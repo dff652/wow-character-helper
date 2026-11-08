@@ -34,4 +34,4 @@
 
 检查了仅按进程名误杀、PID 复用、清理期间出现新窗口、清理失败后重复启动和取消后继续启动的路径。完整路径与启动时间参与核对，状态变化停止，清理最多一次。这是实现者自审，不是独立评审。完整建号和退出重进循环本轮未重跑。
 
-本地输出目录为 outputs/character-helper-preview-v1.4.4；日志和截图在其 data 子目录。源代码保留在开发 worktree，尚未合并主线或推送。
+本地输出目录为 outputs/character-helper-preview-v1.4.4；日志和截图在其 data 子目录。源代码由 feature/character-vision-diagnostics 开发分支维护，尚未合并主线。
