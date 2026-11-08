@@ -145,16 +145,32 @@ sealed class Runner {
   var all=FindProcesses(GamePath);
   try{
    var snapshot=new GameStartupSnapshot{ProcessIds=all.Select(p=>p.Id).ToArray()};var ids=new HashSet<uint>(snapshot.ProcessIds.Select(x=>(uint)x));
+   snapshot.StartedUtcTicks=all.ToDictionary(p=>p.Id,p=>p.StartTime.ToUniversalTime().Ticks);
+   snapshot.OldEnough=snapshot.StartedUtcTicks.Values.All(t=>DateTime.UtcNow.Ticks-t>=TimeSpan.FromMinutes(2).Ticks);
    var windows=new List<IntPtr>();var titles=new List<string>();
    Native.EnumWindows((h,param)=>{uint id;Native.GetWindowThreadProcessId(h,out id);if(ids.Contains(id)&&Native.IsWindowVisible(h)){var text=new StringBuilder(512);Native.GetWindowText(h,text,512);titles.Add("PID "+id+"「"+text+"」");if(text.ToString()=="魔兽世界")windows.Add(h);}return true;},IntPtr.Zero);
    if(windows.Count>1)throw new Exception("发现多个无限版游戏主窗口，请只保留一个后重试。");
-   snapshot.Window=windows.Count==1?windows[0]:IntPtr.Zero;if(titles.Count>0)snapshot.WindowSummary=string.Join(" / ",titles);return snapshot;
+   snapshot.HasVisibleWindows=titles.Count>0;snapshot.Window=windows.Count==1?windows[0]:IntPtr.Zero;if(titles.Count>0)snapshot.WindowSummary=string.Join(" / ",titles);return snapshot;
   }finally{foreach(var p in all)p.Dispose();}
  }
  public string StartupStatus(){return InspectGameStartup().Describe();}
+ void RecoverWindowlessGame(GameStartupSnapshot expected){
+  Check();var current=InspectGameStartup();
+  if(current.HasVisibleWindows||!current.OldEnough||!GameStartup.SameProcesses(expected,current))throw new Exception("清理前游戏状态已变化，已停止，请重试。");
+  foreach(int id in expected.ProcessIds){
+   Check();using(var p=Process.GetProcessById(id)){
+    if(!string.Equals(p.MainModule.FileName,GamePath,StringComparison.OrdinalIgnoreCase)||p.StartTime.ToUniversalTime().Ticks!=expected.StartedUtcTicks[id])throw new Exception("残留进程身份已变化，已停止。");
+    current=InspectGameStartup();
+    if(current.HasVisibleWindows||current.ProcessIds.Any(x=>!expected.ProcessIds.Contains(x))||current.ProcessIds.Any(x=>current.StartedUtcTicks[x]!=expected.StartedUtcTicks[x]))throw new Exception("游戏出现窗口或新进程，停止清理。");
+    Check();log("结束无窗口残留 PID："+id);p.Kill();
+    var end=DateTime.UtcNow.AddSeconds(10);while(!p.HasExited&&DateTime.UtcNow<end)Delay(100);
+    if(!p.HasExited)throw new Exception("残留进程未退出，已停止，避免重复启动。");
+   }
+  }
+ }
  void EnsureGameReady(){
   Flow.Begin("launch","检查游戏窗口，必要时从战网启动。");target=IntPtr.Zero;Check();
-  var h=GameStartup.Resolve(InspectGameStartup,Delay,log);
+  var h=GameStartup.Resolve(InspectGameStartup,Delay,log,30000,RecoverWindowlessGame);
   if(h==IntPtr.Zero){LaunchGame();return;}
   Native.FocusWindow(h);Thread.Sleep(500);target=h;Bind();WaitForGamePage();Flow.Finish("已完成","已复用游戏窗口，页面就绪。");
  }
@@ -200,7 +216,7 @@ sealed class Runner {
   using(var b=CaptureLauncher()){var play=LauncherVision.Play(b,Check);return new Point(origin.X+play.X+play.Width/2,origin.Y+play.Y+play.Height/2);}
  }
  public void CheckLauncherOnly(){LaunchButton();log("PASS: 已选择无限版并核对账号和启动按钮；未启动游戏。");}
- public void LaunchOnly(){ShowLauncher();LaunchGame();log("PASS: 已进入无限版建角页面；未选择角色或提交建号。");}
+ public void LaunchOnly(){EnsureGameReady();log("PASS: 已进入无限版建角页面；未选择角色或提交建号。");}
  static bool SameProcess(IntPtr a,IntPtr b){if(a==IntPtr.Zero||b==IntPtr.Zero)return false;uint x,y;Native.GetWindowThreadProcessId(a,out x);Native.GetWindowThreadProcessId(b,out y);return x!=0&&x==y;}
  void LaunchGame(){Flow.Begin("launch","从战网启动并等待游戏页面。");
   Check();if(GameExists())throw new Exception("游戏仍在运行，已停止，避免重复启动。");
