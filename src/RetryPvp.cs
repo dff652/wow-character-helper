@@ -154,6 +154,13 @@ sealed class Runner {
  }
  Bitmap CaptureLauncher(){Check();Native.Rect r;if(!Native.GetWindowRect(target,out r)||r.R-r.L<700||r.B-r.T<500)throw new Exception("战网窗口尺寸异常。");origin=new Point(r.L,r.T);var b=new Bitmap(r.R-r.L,r.B-r.T,PixelFormat.Format32bppArgb);using(var g=Graphics.FromImage(b))g.CopyFromScreen(origin,Point.Empty,b.Size);Check();return b;}
  public void SnapshotLauncher(){ShowLauncher();using(var b=CaptureLauncher())b.Save(Path.Combine(AppPaths.Screenshots,"调试-战网页面.png"));}
+ public void SelectInfiniteLauncher(){
+  ShowLauncher();Rectangle icon;using(var b=CaptureLauncher())icon=LauncherVision.Icon(b,Check);
+  if(icon.IsEmpty)throw new Exception("未找到战网顶部的无限版图标，请将无限版加入收藏并保持图标可见。");
+  ClickLauncher(new Point(origin.X+icon.Left+icon.Width/2,origin.Y+icon.Top+icon.Height/2));Delay(1500);
+  using(var b=CaptureLauncher())b.Save(Path.Combine(AppPaths.Screenshots,"调试-战网选择无限.png"));
+ }
+ void ClickLauncher(Point p){Check();if(Native.GetAncestor(Native.WindowFromPoint(p),2)!=target)throw new Exception("战网控件被遮挡，已停止。");Native.SetCursorPos(p.X,p.Y);Native.Send(Native.M(2),Native.M(4));}
  public void SnapshotGame(){target=UniqueWindow(GamePath);if(target==IntPtr.Zero)throw new Exception("未找到游戏窗口。");Native.FocusWindow(target);Thread.Sleep(500);Check();Native.Rect r;Native.GetClientRect(target,out r);File.WriteAllText(Path.Combine(AppPaths.Logs,"调试-尺寸.txt"),r.R+"x"+r.B);using(var b=CaptureLauncher())b.Save(Path.Combine(AppPaths.Screenshots,"调试-游戏原图.png"));}
  void CloseBlockedGame(){Flow.Begin("exit","关闭游戏，并等待进程退出。");
   Wait("blocked",10);uint id;Native.GetWindowThreadProcessId(target,out id);
@@ -172,12 +179,11 @@ sealed class Runner {
   }
  }
  Point LaunchButton(){
-  Check();log("核对战网无限服账号与启动按钮。");using(var b=CaptureLauncher()){
-   var m=new Mask(b);if(!v.Has(m,"launcherAccount"))throw new Exception("未识别到战网无限服 WoW3 账号，请保持战网原窗口大小和布局。");
-   var patch=v.P["launcherPlay"];var at=patch.Find(m);if(!at.HasValue)throw new Exception("未识别到进入游戏按钮，已停止。");
-   return new Point(origin.X+at.Value.X+patch.W/2,origin.Y+at.Value.Y+patch.H/2);
-  }
+  Check();log("定位战网无限版图标，自动切换并核对 WoW3 (CN)。");SelectInfiniteLauncher();
+  using(var b=CaptureLauncher()){var play=LauncherVision.Play(b,Check);return new Point(origin.X+play.X+play.Width/2,origin.Y+play.Y+play.Height/2);}
  }
+ public void CheckLauncherOnly(){LaunchButton();log("PASS: 已选择无限版并核对账号和启动按钮；未启动游戏。");}
+ public void LaunchOnly(){ShowLauncher();LaunchGame();log("PASS: 已进入无限版建角页面；未选择角色或提交建号。");}
  static bool SameProcess(IntPtr a,IntPtr b){if(a==IntPtr.Zero||b==IntPtr.Zero)return false;uint x,y;Native.GetWindowThreadProcessId(a,out x);Native.GetWindowThreadProcessId(b,out y);return x!=0&&x==y;}
  void LaunchGame(){Flow.Begin("launch","从战网启动并等待游戏页面。");
   Check();if(GameExists())throw new Exception("游戏仍在运行，已停止，避免重复启动。");
@@ -307,6 +313,8 @@ static class Program {
     Application.EnableVisualStyles();using(var form=new ConfigurationForm(v,true)){form.Show();Application.DoEvents();form.SavePreview(args[1]);form.Close();}return 0;
    }
    if(args.Length==2&&args[0]=="--config-test")return ConfigurationChecks.Run(args[1]);
+   if(args.Length==2&&args[0]=="--launcher-test")return LauncherChecks.Run(args[1]);
+   if(args.Length==2&&args[0]=="--launcher-snapshots")return LauncherChecks.Snapshots(args[1]);
    if(args.Length==2&&args[0]=="--prepare-preview"){
     CreationConfig c;using(var f=File.OpenRead(args[1]))c=(CreationConfig)new System.Xml.Serialization.XmlSerializer(typeof(CreationConfig)).Deserialize(f);
     bool owned;using(var mutex=new Mutex(true,"Local\\WowPvpRetry",out owned)){if(!owned)return 3;using(var cancel=new CancellationTokenSource(TimeSpan.FromMinutes(5))){
@@ -315,6 +323,8 @@ static class Program {
     }}
    }
    if(args.Length==1&&args[0]=="--capture-launcher"){Task.Run(()=>new Runner(v,t=>{},CancellationToken.None,120,1,true).SnapshotLauncher()).GetAwaiter().GetResult();return 0;}
+   if(args.Length==1&&(args[0]=="--launcher-check"||args[0]=="--launch-only")){using(var cancel=new CancellationTokenSource(TimeSpan.FromMinutes(5))){var runner=new Runner(v,t=>File.AppendAllText(Path.Combine(AppPaths.Logs,"启动验证.txt"),DateTime.Now.ToString("s")+" "+t+Environment.NewLine),cancel.Token,120,1,true);Task.Run(()=>{if(args[0]=="--launch-only")runner.LaunchOnly();else runner.CheckLauncherOnly();}).GetAwaiter().GetResult();}return 0;}
+   if(args.Length==1&&args[0]=="--launcher-select-test"){Task.Run(()=>new Runner(v,t=>{},CancellationToken.None,120,1,true).SelectInfiniteLauncher()).GetAwaiter().GetResult();return 0;}
    if(args.Length==1&&args[0]=="--capture-game"){Task.Run(()=>new Runner(v,t=>{},CancellationToken.None,120,1,true).SnapshotGame()).GetAwaiter().GetResult();return 0;}
    // Bounded live test uses the same runner as the GUI; no external UI driver.
    if(args.Length==2&&(args[0]=="--run"||args[0]=="--run-reselect")){
