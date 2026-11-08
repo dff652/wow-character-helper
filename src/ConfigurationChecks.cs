@@ -27,6 +27,7 @@ static class ConfigurationChecks {
     var blocked=ResultsStore.Add(c,2,"待确认","before submit",image);ResultsStore.Update(blocked,"被拦截","server blocked",image);check(ResultsStore.All().Count(r=>r.Id==blocked.Id)==1&&File.Exists(ResultsStore.ImagePath(blocked)),"one durable attempt updated with result screenshot");rejected=false;try{ResultsStore.Confirm(blocked);}catch{rejected=true;}check(rejected,"blocked result cannot be marked success");
    }
    // This profile exercises actual non-default coordinates in the no-submit preview test.
+   File.WriteAllText(Path.Combine(ResultsStore.Root,"malformed.xml"),"<AttemptRecord><Status>待确认</Status></AttemptRecord>");check(ResultsStore.All().All(r=>r.Config!=null),"incomplete result record cannot crash result list");
    var preview=c.Copy();preview.Gender="女性";preview.FirstName="歪瑞歪瑞";preview.LastName="古德";
    using(var f=File.Create(Path.Combine(root,"preview-config.xml")))new XmlSerializer(typeof(CreationConfig)).Serialize(f,preview);
    // Relocation tests use an isolated legacy installation, never the user's data.
@@ -55,6 +56,7 @@ static class ConfigurationChecks {
    future.Status="待执行";JobStore.Save(future);JobStore.Recover(now);check(JobStore.All().Single().Status=="已过期","missed schedule is not replayed on startup");
    future.Config.FirstName="任务快照";JobStore.Save(future);check(JobStore.All().Single().Config.FirstName=="任务快照"&&c.FirstName!="任务快照","task stores separate configuration snapshot");
    future.Status="运行中";bool cannotDelete=false;try{JobStore.Delete(future);}catch{cannotDelete=true;}check(cannotDelete,"running task cannot be deleted");future.Status="已停止";JobStore.Delete(future);check(JobStore.All().Count==0,"stopped task can be deleted");
+   var validJob=new ScheduledJob{Name="healthy",RunAt=DateTime.Now.AddMinutes(-1),Config=c.Copy()};JobStore.Save(validJob);File.WriteAllText(Path.Combine(JobStore.Root,"broken.xml"),"<broken");check(JobStore.All().Count==1&&JobStore.LastReadError!=null,"corrupt task isolated without losing valid tasks");bool blocksQueue=false;try{JobStore.Due(DateTime.Now);}catch{blocksQueue=true;}check(blocksQueue,"corrupt task prevents automatic dispatch");check(File.Exists(Path.Combine(JobStore.Root,"broken.xml")),"corrupt file preserved for investigation");
    double tick=0;var flow=new FlowTrace(()=>tick);flow.Begin("rules","select");tick=2;flow.Begin("role","configure");tick=5;var steps=flow.Snapshot();check(steps.Single(x=>x.Key=="rules").Seconds==2&&steps.Single(x=>x.Key=="role").Seconds==3,"node durations follow actual transitions");
    flow.Finish("已停止","cancelled");tick=20;check(flow.Snapshot().Single(x=>x.Key=="role").Seconds==3,"stopped node timing freezes");flow.Begin("rules","retry");tick=24;flow.Finish("已完成","selected");check(flow.Snapshot().Single(x=>x.Key=="rules").Seconds==6&&flow.Snapshot().Single(x=>x.Key=="rules").Visits==2,"retry accumulates node time and visit count");
    flow.Begin("result","server result");flow.Finish("被拦截","faction imbalance");flow.Begin("wait","cooldown");check(flow.Snapshot().Single(x=>x.Key=="result").Status=="被拦截","blocked result stays distinct from completion");
