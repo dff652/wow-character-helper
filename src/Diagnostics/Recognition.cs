@@ -10,7 +10,7 @@ using System.Web.Script.Serialization;
 namespace CharacterVision {
  public class Word {public string Text;public int Line;public double X,Y,Width,Height;}
  public class OcrResult {public string Text,Language;public long Milliseconds;public Word[] Words;}
- public class Report {public string Version="0.1.0-preview",Source,Page,Notes,Session;public int Width,Height;public double OcrScale;public OcrResult Ocr;public string[] Candidates;}
+ public class Report {public string Version="0.2.0-preview",Engine="Windows.Media.Ocr / zh-Hans-CN",Source,Page,Notes,Session;public bool GoldPass;public int Width,Height;public double OcrScale;public OcrResult Ocr;public string[] Candidates;}
  static class Recognition {
   public static Report Run(string imagePath,string outputRoot){
    string session=Path.Combine(outputRoot,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-"+Guid.NewGuid().ToString("N").Substring(0,6));Directory.CreateDirectory(session);
@@ -21,16 +21,21 @@ namespace CharacterVision {
      using(var g=Graphics.FromImage(normalized)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(input,new Rectangle(Point.Empty,normalized.Size));}
      normalized.Save(Path.Combine(session,"ocr-input.png"));
     }
-    var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell\\v1.0\\powershell.exe"));
-    start.Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "+Quote(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"recognize-image.ps1"))+" -ImagePath "+Quote(Path.Combine(session,"ocr-input.png"))+" -OutputPath "+Quote(Path.Combine(session,"ocr.json"));start.UseShellExecute=false;start.CreateNoWindow=true;start.RedirectStandardError=true;
-    using(var process=Process.Start(start)){var error=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(45000)){process.Kill();throw new Exception("OCR 超过 45 秒，已停止识别进程。");}string message=error.GetAwaiter().GetResult();if(process.ExitCode!=0)throw new Exception("本地 OCR 失败："+message);}
-    var serializer=new JavaScriptSerializer();var ocr=serializer.Deserialize<OcrResult>(File.ReadAllText(Path.Combine(session,"ocr.json")));if(ocr==null||ocr.Words==null)throw new Exception("OCR 结果格式不完整。");
+    var serializer=new JavaScriptSerializer();var ocr=ReadOcr(Path.Combine(session,"ocr-input.png"),Path.Combine(session,"ocr.json"));
     double sx=input.Width/(double)Math.Max(1,(int)Math.Round(input.Width*scale)),sy=input.Height/(double)Math.Max(1,(int)Math.Round(input.Height*scale));
     foreach(var word in ocr.Words){word.X*=sx;word.Y*=sy;word.Width*=sx;word.Height*=sy;}
-    var report=Analyze(ocr,input.Width,input.Height);report.Source=Path.GetFileName(imagePath);report.Session=session;report.OcrScale=scale;
+    bool goldPass=Analyze(ocr,input.Width,input.Height).Page=="疑似对话框，正文尚未确认";
+    if(goldPass){var area=GoldText.Region(input.Width,input.Height);using(var gold=GoldText.Extract(input,area))gold.Save(Path.Combine(session,"gold-input.png"));var extra=ReadOcr(Path.Combine(session,"gold-input.png"),Path.Combine(session,"gold-ocr.json"));int offset=ocr.Words.Length==0?0:ocr.Words.Max(w=>w.Line)+1;foreach(var word in extra.Words){word.X+=area.X;word.Y+=area.Y;word.Line+=offset;}ocr.Words=ocr.Words.Concat(extra.Words).ToArray();ocr.Text+="\n金色文字补读：\n"+extra.Text;ocr.Milliseconds+=extra.Milliseconds;}
+    var report=Analyze(ocr,input.Width,input.Height);report.GoldPass=goldPass;report.Source=Path.GetFileName(imagePath);report.Session=session;report.OcrScale=scale;
     using(var annotated=new Bitmap(input)){using(var g=Graphics.FromImage(annotated))using(var pen=new Pen(Color.LimeGreen,Math.Max(1,input.Width/1600f)))foreach(var word in ocr.Words)g.DrawRectangle(pen,(float)word.X,(float)word.Y,(float)word.Width,(float)word.Height);annotated.Save(Path.Combine(session,"annotated.png"));}
     File.WriteAllText(Path.Combine(session,"report.json"),serializer.Serialize(report));File.WriteAllText(Path.Combine(session,"summary.txt"),Summary(report));return report;
    }
+  }
+  static OcrResult ReadOcr(string image,string result){
+   var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell\\v1.0\\powershell.exe"));
+   start.Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "+Quote(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"recognize-image.ps1"))+" -ImagePath "+Quote(image)+" -OutputPath "+Quote(result);start.UseShellExecute=false;start.CreateNoWindow=true;start.RedirectStandardError=true;
+   using(var process=Process.Start(start)){var error=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(45000)){process.Kill();throw new Exception("OCR 超过 45 秒，已停止识别进程。");}string message=error.GetAwaiter().GetResult();if(process.ExitCode!=0)throw new Exception("本地 OCR 失败："+message);}
+   var value=new JavaScriptSerializer().Deserialize<OcrResult>(File.ReadAllText(result));if(value==null||value.Words==null)throw new Exception("OCR 结果格式不完整。");return value;
   }
   static string Quote(string s){if(s.Contains("\"")||s.Contains("\r")||s.Contains("\n"))throw new Exception("路径包含无效字符。");return "\""+s+"\"";}
   internal static Report Analyze(OcrResult ocr,int width,int height){
@@ -39,7 +44,7 @@ namespace CharacterVision {
    string first=string.Concat(ocr.Words.Where(w=>w.X>width*.34&&w.X<width*.49&&w.Y>height*.025&&w.Y<height*.075).OrderBy(w=>w.X).Select(w=>w.Text));
    string last=string.Concat(ocr.Words.Where(w=>w.X>width*.51&&w.X<width*.66&&w.Y>height*.025&&w.Y<height*.075).OrderBy(w=>w.X).Select(w=>w.Text));
    bool dialog=string.Concat(ocr.Words.Where(w=>w.X>width*.3&&w.X<width*.7&&w.Y>height*.35&&w.Y<height*.75).OrderBy(w=>w.Line).ThenBy(w=>w.X).Select(w=>w.Text)).Contains("确定");
-   if(compact.Contains("阵营")&&(compact.Contains("不平衡")||compact.Contains("人口")))page="疑似阵营限制提示";
+   if(dialog&&compact.Contains("阵营人口不平衡")&&compact.Contains("目前无法")&&compact.Contains("选择该"))page="疑似阵营限制提示";
    else if(dialog)page="疑似对话框，正文尚未确认";
    else if(compact.Contains("规则集")&&compact.IndexOf("PvP",StringComparison.OrdinalIgnoreCase)>=0)page="疑似规则集选择页";
    else if(compact.Contains("自定义")||compact.Contains("肤色")||(first.Length>0&&last.Length>0&&compact.Contains("后退")&&compact.Contains("眼睛")))page="疑似外观/姓名页";

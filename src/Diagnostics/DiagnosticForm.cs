@@ -28,7 +28,7 @@ namespace CharacterVision {
   readonly PictureBox picture=new PictureBox{Dock=DockStyle.Fill,SizeMode=PictureBoxSizeMode.Zoom,BackColor=Color.FromArgb(25,30,38)};
   readonly TextBox summary=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,Dock=DockStyle.Fill,WordWrap=true};
   readonly string root=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"data","diagnostics");
-  public DiagnosticForm(string initialImage=null){Text="建角识别诊断 · 0.1.0 预览 · 只读";Font=new Font("Microsoft YaHei UI",11);AutoScaleMode=AutoScaleMode.Dpi;ClientSize=new Size(1150,760);MinimumSize=new Size(780,520);
+  public DiagnosticForm(string initialImage=null){Text="建角识别诊断 · 0.2.0 预览 · 只读";Font=new Font("Microsoft YaHei UI",11);AutoScaleMode=AutoScaleMode.Dpi;ClientSize=new Size(1150,760);MinimumSize=new Size(780,520);
    var layout=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));Controls.Add(layout);
    var buttons=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Top};buttons.Controls.AddRange(new Control[]{open,capture,folder});layout.Controls.Add(buttons,0,0);layout.Controls.Add(status,0,1);
    var split=new SplitContainer{Dock=DockStyle.Fill,Orientation=Orientation.Vertical};split.Panel1.Controls.Add(picture);split.Panel2.Controls.Add(summary);layout.Controls.Add(split,0,2);Shown+=async(s,e)=>{split.SplitterDistance=(int)(split.Width*.6);if(initialImage!=null)await Recognize(initialImage);};

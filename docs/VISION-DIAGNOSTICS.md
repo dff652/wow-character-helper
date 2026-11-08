@@ -1,4 +1,8 @@
-# 本地识别诊断 0.1.0 预览
+# 本地识别诊断 0.2.0 预览
+
+本轮补读与留出截图结果见 [OCR-EVALUATION.md](OCR-EVALUATION.md)。尚不能依赖 OCR 自动确认名字或提交角色。
+
+## 0.1.0 基础能力和历史验证
 
 开发分支：`feature/character-vision-diagnostics`。这是通用识别改造的第一阶段，不是已完成的通用建号引擎。
 
