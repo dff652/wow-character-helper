@@ -127,7 +127,7 @@ sealed class Runner {
  void Check(){Native.EnsurePhysicalCoordinates();ct.ThrowIfCancellationRequested();if(endAt.HasValue&&DateTime.UtcNow>=endAt.Value)throw new Exception("已达到最长运行时长，已停止。");if((Native.GetAsyncKeyState(27)&0x8000)!=0||(Native.GetAsyncKeyState(120)&0x8000)!=0)throw new OperationCanceledException();if(target!=IntPtr.Zero&&Native.GetForegroundWindow()!=target){uint a,b;Native.GetWindowThreadProcessId(target,out a);var front=Native.GetForegroundWindow();Native.GetWindowThreadProcessId(front,out b);if(a!=0&&a==b)return;var title=new StringBuilder(512);Native.GetWindowText(front,title,512);throw new Exception("游戏或战网失去前台，已停止。当前窗口："+title);}}
  void Delay(int ms){var timer=Stopwatch.StartNew();while(timer.ElapsedMilliseconds<ms){Check();int left=ms-(int)timer.ElapsedMilliseconds;if(left>0)Thread.Sleep(Math.Min(100,left));}Check();}
  void Bind(){
-  target=UniqueWindow(GamePath);if(target==IntPtr.Zero)throw new Exception("未找到游戏主窗口。");Check();uint id;Native.GetWindowThreadProcessId(target,out id);
+  target=UniqueWindow(GamePath);if(target==IntPtr.Zero)throw new Exception("游戏主窗口已消失，请检查游戏是否退出后重试。");Check();uint id;Native.GetWindowThreadProcessId(target,out id);
   using(var p=Process.GetProcessById((int)id))if(!string.Equals(p.MainModule.FileName,GamePath,StringComparison.OrdinalIgnoreCase))throw new Exception("请先切到《魔兽世界：无限》，再按 F8。");
  }
  List<Process> FindProcesses(string path){
@@ -141,6 +141,23 @@ sealed class Runner {
   return found;
  }
  bool GameExists(){var all=FindProcesses(GamePath);bool yes=all.Count>0;foreach(var p in all)p.Dispose();return yes;}
+ GameStartupSnapshot InspectGameStartup(){
+  var all=FindProcesses(GamePath);
+  try{
+   var snapshot=new GameStartupSnapshot{ProcessIds=all.Select(p=>p.Id).ToArray()};var ids=new HashSet<uint>(snapshot.ProcessIds.Select(x=>(uint)x));
+   var windows=new List<IntPtr>();var titles=new List<string>();
+   Native.EnumWindows((h,param)=>{uint id;Native.GetWindowThreadProcessId(h,out id);if(ids.Contains(id)&&Native.IsWindowVisible(h)){var text=new StringBuilder(512);Native.GetWindowText(h,text,512);titles.Add("PID "+id+"「"+text+"」");if(text.ToString()=="魔兽世界")windows.Add(h);}return true;},IntPtr.Zero);
+   if(windows.Count>1)throw new Exception("发现多个无限版游戏主窗口，请只保留一个后重试。");
+   snapshot.Window=windows.Count==1?windows[0]:IntPtr.Zero;if(titles.Count>0)snapshot.WindowSummary=string.Join(" / ",titles);return snapshot;
+  }finally{foreach(var p in all)p.Dispose();}
+ }
+ public string StartupStatus(){return InspectGameStartup().Describe();}
+ void EnsureGameReady(){
+  Flow.Begin("launch","检查游戏窗口，必要时从战网启动。");target=IntPtr.Zero;Check();
+  var h=GameStartup.Resolve(InspectGameStartup,Delay,log);
+  if(h==IntPtr.Zero){LaunchGame();return;}
+  Native.FocusWindow(h);Thread.Sleep(500);target=h;Bind();WaitForGamePage();Flow.Finish("已完成","已复用游戏窗口，页面就绪。");
+ }
  IntPtr UniqueWindow(string path){
   var all=FindProcesses(path);try{var ids=new HashSet<uint>(all.Select(p=>(uint)p.Id));var windows=new List<IntPtr>();string title=path==GamePath?"魔兽世界":"战网";
    Native.EnumWindows((h,param)=>{uint id;Native.GetWindowThreadProcessId(h,out id);if(ids.Contains(id)&&Native.IsWindowVisible(h)){var text=new StringBuilder(512);Native.GetWindowText(h,text,512);if(text.ToString()==title)windows.Add(h);}return true;},IntPtr.Zero);
@@ -198,8 +215,11 @@ sealed class Runner {
    Delay(300);
   }
   if(target==IntPtr.Zero)throw new Exception("游戏启动超时，已停止。");
-  end=DateTime.UtcNow.AddSeconds(120);
-  while(DateTime.UtcNow<end){Native.Rect bounds;if(!Native.GetClientRect(target,out bounds)||bounds.R<1280||Math.Abs(bounds.R/(double)bounds.B-16.0/9)>0.03){Delay(700);continue;}string st=Observe();if(st=="rules"||st=="list"||st=="race")return;Delay(700);}
+  WaitForGamePage();
+ }
+ void WaitForGamePage(){
+  var end=DateTime.UtcNow.AddSeconds(120);
+  while(DateTime.UtcNow<end){Native.Rect bounds;if(!Native.GetClientRect(target,out bounds)||bounds.R<1280||bounds.B<720||Math.Abs(bounds.R/(double)bounds.B-16.0/9)>0.03){Delay(700);continue;}string st=Observe();if(st=="rules"||st=="list"||st=="race"||st=="custom"||st=="blocked")return;Delay(700);}
   throw new Exception("未进入可识别的建角页面，已停止。请手动处理登录、排队或错误提示。");
  }
  void RestartAfterDelay(){
@@ -274,8 +294,8 @@ sealed class Runner {
   AttemptRecord record;using(var b=Capture())record=ResultsStore.Add(config,attempt,"待确认","准备发送建号请求。若程序中断，请先核对游戏；这条记录不代表请求已送达或创建成功。",b);
   SaveDiagnostic("调试-提交前");log("角色与姓名核对通过，提交创建。");Button("finish","custom");return record;
  }
- public CalibrationBundle Calibrate(){Flow.Begin("prepare","检查配置并准备不提交预览。");CombinationRules.ValidateSave(config);CombinationRules.ValidateInstalledBuild(config);FocusInitial();log("预览校准：不会点击完成或提交建号。");Delay(3000);if(GameExists())Bind();else LaunchGame();BackToRules();return PrepareCharacter(true);}
- void FocusInitial(){var h=UniqueWindow(GamePath);if(h!=IntPtr.Zero){Native.FocusWindow(h);Thread.Sleep(500);target=h;Check();}else ShowLauncher();}
+ public CalibrationBundle Calibrate(){Flow.Begin("prepare","检查配置并准备不提交预览。");CombinationRules.ValidateSave(config);CombinationRules.ValidateInstalledBuild(config);FocusInitial();log("预览校准：不会点击完成或提交建号。");Delay(3000);EnsureGameReady();BackToRules();return PrepareCharacter(true);}
+ void FocusInitial(){var h=UniqueWindow(GamePath);if(h!=IntPtr.Zero){Native.FocusWindow(h);Thread.Sleep(500);target=h;Check();}else if(GameExists()){target=IntPtr.Zero;Check();}else ShowLauncher();}
  void Record(AttemptRecord record,string status,string detail){using(var b=Capture())ResultsStore.Update(record,status,detail,b);}
  public void Run(bool activate=false){
   Flow.Begin("prepare","校验角色配置、窗口和显示尺寸。");
@@ -284,8 +304,7 @@ sealed class Runner {
   if(config.MaxMinutes>0)endAt=DateTime.UtcNow.AddMinutes(config.MaxMinutes);
   CombinationRules.ValidateInstalledBuild(config);if(activate)FocusInitial();
   log("5 秒后开始，请切回游戏或战网无限服页面。F9 或 Esc 停止。");Delay(5000);
-  if(GameExists()){Flow.Skip("launch","游戏已打开，无需启动。");Bind();if(restart&&Observe()=="blocked"){CloseBlockedGame();RestartAfterDelay();}}
-  else{target=Native.GetForegroundWindow();uint pid;Native.GetWindowThreadProcessId(target,out pid);using(var p=Process.GetProcessById((int)pid))if(!string.Equals(p.MainModule.FileName,LauncherPath,StringComparison.OrdinalIgnoreCase))throw new Exception("请切回战网无限服页面再开始。");LaunchGame();}
+  EnsureGameReady();if(restart&&Observe()=="blocked"){CloseBlockedGame();RestartAfterDelay();}
   for(int i=1;i<=max;i++){AttemptNumber=i;
    log("第 "+i+" 轮：返回并重新选择 "+config.RuleSet+"。");BackToRules();var record=Create(i);Flow.Begin("result","等待并识别服务器返回结果。");
    var end=DateTime.UtcNow.AddSeconds(35);bool blocked=false;
@@ -313,6 +332,8 @@ static class Program {
     Application.EnableVisualStyles();using(var form=new ConfigurationForm(v,true)){form.Show();Application.DoEvents();form.SavePreview(args[1]);form.Close();}return 0;
    }
    if(args.Length==2&&args[0]=="--config-test")return ConfigurationChecks.Run(args[1]);
+   if(args.Length==2&&args[0]=="--startup-test")return GameStartupChecks.Run(args[1]);
+   if(args.Length==2&&args[0]=="--startup-status"){File.WriteAllText(args[1],new Runner(v,t=>{},CancellationToken.None,new CreationConfig()).StartupStatus());return 0;}
    if(args.Length==2&&args[0]=="--launcher-test")return LauncherChecks.Run(args[1]);
    if(args.Length==2&&args[0]=="--launcher-snapshots")return LauncherChecks.Snapshots(args[1]);
    if(args.Length==2&&args[0]=="--prepare-preview"){

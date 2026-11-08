@@ -5,7 +5,7 @@ if ([string]::IsNullOrEmpty($BuildDirectory)) { $BuildDirectory = Join-Path $rep
 $exe = Join-Path $BuildDirectory 'RetryPvp.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build first with scripts/build.ps1.' }
 $testRoot = Join-Path $repoRoot 'test-output'
-foreach ($test in @(@('--config-test','config'),@('--layout-test','layout'),@('--task-ui-test','task-ui'),@('--launcher-test','launcher'))) {
+foreach ($test in @(@('--config-test','config'),@('--layout-test','layout'),@('--task-ui-test','task-ui'),@('--launcher-test','launcher'),@('--startup-test','startup'))) {
     $destination = Join-Path $testRoot $test[1]
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
     $process = Start-Process -FilePath $exe -ArgumentList @($test[0],('"' + $destination + '"')) -WindowStyle Hidden -PassThru -Wait
