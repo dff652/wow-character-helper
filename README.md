@@ -1,4 +1,4 @@
-> 开发预览 **1.4.1-preview**：增加版本绑定的组合校验、职业联动和人工重名处理。精简页首与进度文案，移除颜色图例；完成 8 个基础种族的[游戏界面检查](docs/COMBINATION-INSPECTION.md)。白名单尚不完整，自动识别重名尚未实现。详见 [组合与重名说明](docs/COMBINATION-AND-NAMES.md)。下方保留稳定版功能说明。
+> 开发预览 **1.4.2-preview**：增加版本绑定的组合校验、职业联动和人工重名处理。职业列表按种族联动，只显示实测范围内可用职业；自动执行验证单独判断。精简页首与进度文案，移除颜色图例；完成 8 个基础种族的[游戏界面检查](docs/COMBINATION-INSPECTION.md)。白名单尚不完整，自动识别重名尚未实现。详见 [组合与重名说明](docs/COMBINATION-AND-NAMES.md)。下方保留稳定版功能说明。
 # 无限服建号助手 · WoW Character Helper
 
 版本 **1.3.2** · 作者 **dff652** · 开发协助：OpenAI Codex
