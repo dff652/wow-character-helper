@@ -11,7 +11,7 @@ static class CombinationRules {
   if(c.ClientBuild!=Build)return CombinationState.Unknown;
   // Evidence: local game preview and submissions, 2026-11-08.
   if(c.Race=="牛头人"&&c.ClassName=="德鲁伊")return CombinationState.Verified;
-  // Explicitly reported unsupported by the user for this client.
+  // Confirmed in the PvP client UI on 2026-11-08: disabled; click kept Warlock selected.
   if(c.Race=="亡灵"&&c.ClassName=="德鲁伊")return CombinationState.Unsupported;
   return CombinationState.Unknown;
  }

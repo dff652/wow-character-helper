@@ -22,7 +22,7 @@ sealed partial class ConfigurationForm:Form {
  readonly Button start=ButtonText("开始运行  F8"),stop=ButtonText("停止  F9"),prepare=ButtonText("预览校准（不提交）"),save=ButtonText("保存配置"),confirm=ButtonText("确认已建号成功");
  readonly TableLayoutPanel columns=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,ColumnCount=2,Padding=new Padding(10)};
  readonly GroupBox roleBox=Group("建号配置"),timerBox=Group("重试与定时");
- readonly Label heading=LabelText("角色配置 · 定时重试 · 结果记录"),subtitle=LabelText("先配置，再预览核对。未知结果会停止，避免重复建号。");
+ readonly Label heading=LabelText("建号助手"),subtitle=LabelText("配置角色，定时重试");
  readonly FlowProgressView flowView=new FlowProgressView();
  readonly Stopwatch elapsed=new Stopwatch();readonly System.Windows.Forms.Timer progressTimer=new System.Windows.Forms.Timer{Interval=500};readonly Label metrics=LabelText("耗时 00:00:00 · 尚未开始");Runner activeRunner;
  string currentBuild=CombinationRules.Build;readonly Button nameConflict=ButtonText("确认重名并修改姓名");
