@@ -1,6 +1,6 @@
-﻿# 无限服建号助手 · WoW Character Helper
+# 无限服建号助手 · WoW Character Helper
 
-版本 **1.3.1** · 作者 **dff652** · 开发协助：OpenAI Codex
+版本 **1.3.2** · 作者 **dff652** · 开发协助：OpenAI Codex
 
 Windows 图形工具：配置角色、按间隔重新选择规则集并尝试建号、保存本地结果。
 
